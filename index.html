@@ -487,8 +487,9 @@ async function buildPageMap() {
 
 /**
  * HPLC 페이지에서 텍스트 메타데이터 추출
- * 반환: { sampleName, sampleInfo, addInfoPdfY, peakHeaderPdfY, totalsPdfY,
- *         peakRows:[{pdfY, areaPct}], rowH, pageH, pageW }
+ * 반환: { sampleName, sampleInfo, addInfoPdfY, areaReportPdfY,
+ *         peakHeaderPdfY, totalsPdfY,
+ *         peakRows:[{pdfY, areaPct, areaPdfX, areaItemW}], rowH, pageH, pageW }
  */
 async function extractHplcMeta(page) {
   const tc    = await page.getTextContent();
@@ -497,25 +498,26 @@ async function extractHplcMeta(page) {
   const pageW = vp.width;
   const lines = groupByLine(tc.items);
 
-  let sampleName    = '';
-  let sampleInfo    = '';
-  let addInfoPdfY   = null;
-  let peakHeaderPdfY = null;
-  let totalsPdfY    = null;
-  let peakRows      = [];
-  let inTable       = false;
+  let sampleName      = '';
+  let sampleInfo      = '';
+  let addInfoPdfY     = null;
+  let areaReportPdfY  = null; // "====areapercent report====" 줄 Y
+  let peakHeaderPdfY  = null;
+  let totalsPdfY      = null;
+  let peakRows        = [];
+  let inTable         = false;
 
   for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
-    const text = line.items.map(i => i.str).join(' ').trim();
-    const y    = line.y;
+    const line    = lines[li];
+    const rawJoin = line.items.map(i => i.str).join('');       // 공백 없이 합치기
+    const text    = line.items.map(i => i.str).join(' ').trim();
+    const y       = line.y;
 
     // Sample Name
     if (/Sample\s*Name\s*:/i.test(text)) {
       const val = text.replace(/.*Sample\s*Name\s*:\s*/i, '').trim();
       if (val) sampleName = val;
       else if (li + 1 < lines.length) {
-        // 다음 줄에 값이 있는 경우
         const next = lines[li + 1].items.map(i => i.str).join(' ').trim();
         if (next && !/Sample/i.test(next)) sampleName = next;
       }
@@ -536,6 +538,15 @@ async function extractHplcMeta(page) {
       addInfoPdfY = y;
     }
 
+    // ====areapercent report==== 구분선 또는 Signal 헤더 감지
+    // → 크로마토 하단 경계로 사용 (차트에서 이 부분 제외)
+    if (areaReportPdfY === null) {
+      if (/={3,}/.test(rawJoin) || /areapercent/i.test(rawJoin) ||
+          /Signal\s*\d.*DAD/i.test(text) || /DAD\d.*Sig=/i.test(text)) {
+        areaReportPdfY = y;
+      }
+    }
+
     // Peak 테이블 헤더: "Peak  RetTime ..."
     if (/Peak\s+RetTime/i.test(text)) {
       peakHeaderPdfY = y;
@@ -553,12 +564,23 @@ async function extractHplcMeta(page) {
       const cols = text.trim().split(/\s+/);
       if (
         cols.length >= 6 &&
-        /^\d+$/.test(cols[0]) &&             // 첫 컬럼: 피크 번호
-        /^[\d.eE+\-]+$/.test(cols[1])        // 두번째: RetTime
+        /^\d+$/.test(cols[0]) &&       // 첫 컬럼: 피크 번호
+        /^[\d.eE+\-]+$/.test(cols[1]) // 두번째: RetTime
       ) {
         const areaPct = parseFloat(cols[cols.length - 1]);
         if (!isNaN(areaPct) && areaPct >= 0 && areaPct <= 100) {
-          peakRows.push({ pdfY: y, areaPct });
+          // Area% 숫자가 있는 텍스트 아이템의 위치 찾기 (가장 오른쪽 숫자 아이템)
+          let areaItem = null;
+          for (let k = line.items.length - 1; k >= 0; k--) {
+            const v = parseFloat(line.items[k].str.trim());
+            if (!isNaN(v)) { areaItem = line.items[k]; break; }
+          }
+          peakRows.push({
+            pdfY:      y,
+            areaPct,
+            areaPdfX:  areaItem ? areaItem.transform[4] : null,
+            areaItemW: areaItem ? (areaItem.width || 25) : 25,
+          });
         }
       }
     }
@@ -567,12 +589,13 @@ async function extractHplcMeta(page) {
   // 행 높이 추정 (피크 행들의 Y 간격)
   let rowH = 10;
   if (peakRows.length >= 2) {
-    const ys   = peakRows.map(p => p.pdfY).sort((a, b) => b - a);
+    const ys    = peakRows.map(p => p.pdfY).sort((a, b) => b - a);
     const diffs = ys.slice(0, -1).map((y, i) => y - ys[i + 1]).filter(d => d > 0.5);
     if (diffs.length) rowH = Math.min(...diffs);
   }
 
-  return { sampleName, sampleInfo, addInfoPdfY, peakHeaderPdfY, totalsPdfY, peakRows, rowH, pageH, pageW };
+  return { sampleName, sampleInfo, addInfoPdfY, areaReportPdfY,
+           peakHeaderPdfY, totalsPdfY, peakRows, rowH, pageH, pageW };
 }
 
 /**
@@ -593,24 +616,30 @@ async function processHplcPage(pageNum, scale) {
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
   const meta = await extractHplcMeta(page);
-  const { sampleName, sampleInfo, addInfoPdfY, peakHeaderPdfY, totalsPdfY,
-          peakRows, rowH, pageH } = meta;
+  const { sampleName, sampleInfo, addInfoPdfY, areaReportPdfY,
+          peakHeaderPdfY, totalsPdfY, peakRows, rowH, pageH } = meta;
   const W = cvs.width, H = cvs.height;
 
-  // ── 빨간 박스: Area% >= 1인 피크 행에 표시
+  // ── 빨간 박스: Area% >= 1인 피크의 Area% 숫자 셀만 박스 표시
   const highPeaks = peakRows.filter(p => p.areaPct >= 1);
   if (highPeaks.length > 0) {
     const rh  = rowH * scale;
-    const pad = rh * 0.18;
-    const tx  = 22 * scale;
-    const tw  = W - 44 * scale;
+    const pad = rh * 0.15;
     ctx.save();
     ctx.strokeStyle = '#DD0000';
     ctx.lineWidth   = Math.max(1.5, scale * 0.55);
     for (const peak of highPeaks) {
       const cy = pdf2cvsY(peak.pdfY, pageH, scale);
-      // 텍스트 기준선(cy)에서 행 높이만큼 위로 올려 박스 그리기
-      ctx.strokeRect(tx, cy - rh + pad, tw, rh + pad * 0.5);
+      if (peak.areaPdfX !== null) {
+        // Area% 숫자 셀만 박스 (X위치는 PDF좌표 → 캔버스, 폭은 아이템 width + 여백)
+        const bx = peak.areaPdfX * scale - 3 * scale;
+        const bw = peak.areaItemW * scale + 6 * scale;
+        ctx.strokeRect(bx, cy - rh + pad, bw, rh);
+      } else {
+        // X좌표 정보 없을 때 행 오른쪽 20% 영역만 박스
+        const bx = W * 0.80;
+        ctx.strokeRect(bx, cy - rh + pad, W - bx - 18 * scale, rh);
+      }
     }
     ctx.restore();
   }
@@ -620,10 +649,12 @@ async function processHplcPage(pageNum, scale) {
   const chartTop = addInfoPdfY !== null
     ? pdf2cvsY(addInfoPdfY, pageH, scale) + 14 * scale
     : 640 / 2526 * H;
-  // 아래: Peak 헤더 위까지 (없으면 기본 비율)
-  const chartBot = peakHeaderPdfY !== null
-    ? pdf2cvsY(peakHeaderPdfY, pageH, scale) - 30 * scale
-    : 1310 / 2526 * H;
+  // 아래: ====areapercent report==== 줄 바로 위 (없으면 Peak 헤더 기준, 없으면 고정 비율)
+  const chartBot = areaReportPdfY !== null
+    ? pdf2cvsY(areaReportPdfY, pageH, scale) - 8 * scale
+    : peakHeaderPdfY !== null
+      ? pdf2cvsY(peakHeaderPdfY, pageH, scale) - 60 * scale
+      : 1310 / 2526 * H;
 
   const chartX = 18 * scale;
   const chartW = W - 36 * scale;
