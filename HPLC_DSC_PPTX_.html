@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>분석결과 → PPTX 자동변환기</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root{
+  --red:#C0212B; --red2:#e8333e; --bg:#f5f4f1; --ink:#1a1a1a;
+  --ink2:#555; --line:#d8d6d0; --white:#fff;
+  --panel:#fffefb; --mono:'JetBrains Mono',monospace;
+  --body:'Noto Sans KR',sans-serif; --display:'Bebas Neue',sans-serif;
+  --green:#1a7f4b; --amber:#c47f00;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);min-height:100vh;overflow-x:hidden}
+
+/* ─── 사선 배경 패턴 */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(
+    -55deg, transparent, transparent 40px,
+    rgba(192,33,43,0.025) 40px, rgba(192,33,43,0.025) 41px
+  );
+}
+
+.wrap{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:0 28px 100px}
+
+/* ─── 상단 헤더 */
+.site-header{
+  padding:40px 0 32px;
+  display:flex;align-items:flex-end;justify-content:space-between;
+  border-bottom:3px solid var(--ink);margin-bottom:48px;
+}
+.header-left{}
+.eyebrow{
+  font-family:var(--mono);font-size:11px;color:var(--red);
+  letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px;
+  display:flex;align-items:center;gap:8px;
+}
+.eyebrow::before{content:'';width:24px;height:2px;background:var(--red);display:block}
+h1{
+  font-family:var(--display);
+  font-size:clamp(40px,6vw,68px);
+  line-height:.95;letter-spacing:.01em;color:var(--ink);
+}
+h1 em{color:var(--red);font-style:normal}
+.header-version{
+  font-family:var(--mono);font-size:10px;color:var(--ink2);
+  border:1px solid var(--line);border-radius:3px;
+  padding:4px 10px;white-space:nowrap;
+}
+
+/* ─── 스텝 헤더 */
+.step{margin-bottom:36px}
+.step-head{
+  display:flex;align-items:center;gap:14px;
+  margin-bottom:16px;
+}
+.step-num{
+  font-family:var(--display);font-size:44px;
+  color:var(--red);line-height:1;
+  border-right:2px solid var(--line);padding-right:14px;
+}
+.step-info{}
+.step-title{font-weight:700;font-size:15px;letter-spacing:.02em}
+.step-desc{font-size:12px;color:var(--ink2);margin-top:2px}
+
+/* ─── 드롭존 */
+.dropzone{
+  border:2px dashed var(--line);border-radius:4px;
+  padding:52px 24px;text-align:center;cursor:pointer;
+  background:var(--panel);transition:all .2s;position:relative;overflow:hidden;
+}
+.dropzone.active{border-color:var(--red);background:rgba(192,33,43,.03)}
+.dropzone:hover{border-color:#aaa}
+.dz-icon{font-size:36px;display:block;margin-bottom:14px;opacity:.5}
+.dz-main{font-weight:700;font-size:15px;margin-bottom:5px}
+.dz-sub{font-size:12px;color:var(--ink2)}
+.dz-sub b{color:var(--ink)}
+#fileInput{display:none}
+
+/* ─── 파일 정보 바 */
+.file-bar{
+  display:none;align-items:center;gap:12px;
+  border:1.5px solid var(--ink);border-radius:4px;
+  padding:12px 16px;background:var(--panel);
+  margin-top:12px;
+}
+.file-bar.show{display:flex}
+.fb-icon{font-size:22px}
+.fb-info{flex:1}
+.fb-name{font-family:var(--mono);font-size:12px;font-weight:500}
+.fb-meta{font-size:11px;color:var(--ink2);margin-top:2px}
+.fb-remove{
+  background:none;border:1.5px solid var(--line);border-radius:3px;
+  padding:5px 10px;font-size:11px;color:var(--ink2);cursor:pointer;
+  font-family:var(--mono);transition:all .15s;
+}
+.fb-remove:hover{border-color:var(--red);color:var(--red)}
+
+/* ─── 설정 패널 */
+.config-box{
+  border:1.5px solid var(--line);border-radius:4px;
+  background:var(--panel);overflow:hidden;
+}
+.config-row{
+  display:grid;grid-template-columns:1fr 1fr;
+  border-bottom:1px solid var(--line);
+}
+.config-row:last-child{border-bottom:none}
+.cfg{
+  padding:14px 18px;border-right:1px solid var(--line);
+}
+.cfg:last-child{border-right:none}
+.cfg-label{
+  font-family:var(--mono);font-size:10px;
+  color:var(--ink2);letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:6px;
+}
+.cfg input,.cfg select{
+  width:100%;background:transparent;border:none;border-bottom:1.5px solid var(--line);
+  padding:5px 0;font-family:var(--mono);font-size:13px;
+  color:var(--ink);outline:none;transition:border-color .15s;
+}
+.cfg input:focus,.cfg select:focus{border-bottom-color:var(--red)}
+.cfg select option{background:#fff}
+
+/* ─── 실행 버튼 */
+.action-row{display:flex;gap:10px;margin-top:0}
+.btn{
+  flex:1;padding:16px 20px;border:none;cursor:pointer;
+  font-family:var(--display);font-size:18px;letter-spacing:.06em;
+  border-radius:3px;transition:all .15s;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+}
+.btn-run{background:var(--red);color:#fff}
+.btn-run:hover:not(:disabled){background:#a81820;transform:translateY(-2px);box-shadow:0 6px 24px rgba(192,33,43,.3)}
+.btn-run:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-preview{
+  background:transparent;color:var(--ink);
+  border:1.5px solid var(--ink);flex:0 0 auto;padding:16px 20px;
+  font-size:14px;font-family:var(--body);font-weight:700;
+}
+.btn-preview:hover:not(:disabled){border-color:var(--red);color:var(--red)}
+.btn-preview:disabled{opacity:.4;cursor:not-allowed}
+
+/* 스피너 */
+.spin{
+  width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;
+  animation:rot .55s linear infinite;display:none;
+}
+.spin.on{display:block}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* ─── 진행 */
+.progress-wrap{display:none;margin-top:16px}
+.progress-wrap.show{display:block}
+.prog-meta{
+  display:flex;justify-content:space-between;
+  font-family:var(--mono);font-size:11px;color:var(--ink2);
+  margin-bottom:7px;
+}
+.prog-track{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.prog-fill{
+  height:100%;width:0%;background:var(--red);
+  border-radius:2px;transition:width .35s ease;
+}
+
+/* ─── 로그 */
+.log-box{
+  display:none;border:1.5px solid var(--line);border-radius:4px;
+  margin-top:14px;overflow:hidden;background:var(--panel);
+}
+.log-box.show{display:block}
+.log-top{
+  padding:9px 14px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;color:var(--ink2);
+  display:flex;align-items:center;gap:8px;
+}
+.log-led{width:7px;height:7px;border-radius:50%;background:var(--amber)}
+.log-led.run{background:var(--red);animation:blink .8s infinite}
+.log-led.ok {background:var(--green);animation:none}
+.log-led.err{background:var(--red);animation:none}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.log-content{
+  padding:12px 14px;max-height:220px;overflow-y:auto;
+  font-family:var(--mono);font-size:11.5px;line-height:1.85;
+}
+.log-content::-webkit-scrollbar{width:3px}
+.log-content::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+.ll{color:var(--ink2)}
+.ll.ok{color:var(--green)}
+.ll.err{color:var(--red)}
+.ll.info{color:#2563eb}
+.ll.warn{color:var(--amber)}
+
+/* ─── 미리보기 */
+.preview-area{display:none;margin-top:32px}
+.preview-area.show{display:block}
+.section-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink2);
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;
+}
+.section-label::after{content:'';flex:1;height:1px;background:var(--line)}
+.thumb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.thumb{
+  border:1.5px solid var(--line);border-radius:3px;overflow:hidden;
+  cursor:pointer;transition:border-color .15s;background:var(--white);
+}
+.thumb:hover{border-color:var(--red)}
+.thumb canvas{width:100%;display:block}
+.thumb-lbl{
+  padding:4px 7px;font-family:var(--mono);font-size:9px;
+  color:var(--ink2);border-top:1px solid var(--line);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.thumb-type{
+  display:inline-block;
+  background:var(--red);color:#fff;
+  font-size:8px;padding:1px 5px;border-radius:2px;margin-right:4px;
+}
+.thumb-type.dsc{background:#1d4ed8}
+
+/* ─── 결과 */
+.result-bar{
+  display:none;margin-top:20px;
+  border:2.5px solid var(--green);border-radius:4px;
+  padding:24px 28px;background:var(--panel);
+  animation:slideUp .4s ease;
+}
+.result-bar.show{display:flex;align-items:center;gap:20px}
+@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.result-icon{font-size:40px;flex-shrink:0}
+.result-text{}
+.result-title{font-family:var(--display);font-size:26px;color:var(--green);letter-spacing:.03em}
+.result-sub{font-size:12px;color:var(--ink2);margin-top:3px;font-family:var(--mono)}
+.btn-dl{
+  margin-left:auto;flex-shrink:0;
+  background:var(--green);color:#fff;border:none;border-radius:3px;
+  padding:14px 24px;cursor:pointer;font-family:var(--display);
+  font-size:17px;letter-spacing:.05em;transition:all .15s;
+  display:flex;align-items:center;gap:8px;
+}
+.btn-dl:hover{background:#155f38;transform:translateY(-1px)}
+
+/* 구분선 */
+.divider{height:1px;background:var(--line);margin:40px 0}
+
+/* 알림 태그 */
+.note{
+  font-size:11px;color:var(--ink2);font-family:var(--mono);
+  background:rgba(0,0,0,.03);border:1px solid var(--line);
+  border-radius:3px;padding:8px 12px;margin-top:12px;
+  line-height:1.6;
+}
+.note::before{content:'ℹ  ';color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 헤더 -->
+  <div class="site-header">
+    <div class="header-left">
+      <div class="eyebrow">LT Materials · 전자 재료 사업부</div>
+      <h1>HPLC / DSC<br><em>자동 변환기</em></h1>
+    </div>
+    <div class="header-version">v2.0 · PDF → PPTX</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-head">
+      <div class="step-num">01</div>
+      <div class="step-info">
+        <div class="step-title">분석 보고서 PDF 업로드</div>
+        <div class="step-desc">HPLC + DSC가 포함된 PDF 파일을 드래그하거나 클릭하여 선택하세요</div>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <span class="dz-icon">📂</span>
+      <div class="dz-main">PDF 파일을 여기에 드래그 또는 클릭하여 업로드</div>
+      <div class="dz-sub">분석 결과 보고서 PDF · <b>최대 200MB</b> · PDF만 가능</div>
+      <input type="file" id="fileInput" accept=".pdf">
+    </div>
+
+    <div class="file-bar" id="fileBar">
+      <div class="fb-icon">📋</div>
+      <div class="fb-info">
+        <div class="fb-name" id="fbName">—</div>
+        <div class="fb-meta" id="fbMeta">—</div>
+      </div>
+      <button class="fb-remove" id="fbRemove">✕ 제거</button>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-head">
+      <div class="step-num">02</div>
+      <div class="step-info">
+        <div class="step-title">변환 설정</div>
+        <div class="step-desc">PPTX 제목, 페이지 범위 등을 설정합니다</div>
+      </div>
+    </div>
+
+    <div class="config-box">
+      <div class="config-row">
+        <div class="cfg">
+          <div class="cfg-label">PPTX 제목</div>
+          <input type="text" id="cfgTitle" value="CEH0-G31 분석결과 보고서">
+        </div>
+        <div class="cfg">
+          <div class="cfg-label">재료명</div>
+          <input type="text" id="cfgMaterial" value="CEH0-G31">
+        </div>
+      </div>
+      <div class="config-row">
+        <div class="cfg">
+          <div class="cfg-label">HPLC 페이지 범위</div>
+          <input type="text" id="cfgHplc" value="1-36" placeholder="예: 1-36">
+        </div>
+        <div class="cfg">
+          <div class="cfg-label">DSC 페이지 범위</div>
+          <input type="text" id="cfgDsc" value="37-45" placeholder="예: 37-45">
+        </div>
+      </div>
+      <div class="config-row">
+        <div class="cfg">
+          <div class="cfg-label">렌더링 해상도</div>
+          <select id="cfgScale">
+            <option value="2">2× — 빠름</option>
+            <option value="3" selected>3× — 표준 (권장)</option>
+            <option value="4">4× — 고품질 (느림)</option>
+          </select>
+        </div>
+        <div class="cfg">
+          <div class="cfg-label">HPLC 슬라이드 묶음</div>
+          <select id="cfgPair">
+            <option value="2" selected>2페이지씩 (1st / 2nd)</option>
+            <option value="1">1페이지씩 (단독)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">HPLC 크로마토그램 차트 + Area Percent 테이블, DSC 그래프를 각 페이지에서 자동으로 크롭하여 삽입합니다.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-head">
+      <div class="step-num">03</div>
+      <div class="step-info">
+        <div class="step-title">변환 실행 &amp; 다운로드</div>
+        <div class="step-desc">버튼을 눌러 PPTX를 생성하세요. 브라우저 내에서 완전 처리되며 외부 전송 없음.</div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-run" id="btnRun" disabled>
+        <div class="spin" id="spin"></div>
+        <span id="btnTxt">▶  PPTX 변환 시작</span>
+      </button>
+      <button class="btn btn-preview" id="btnPrev" disabled>🔍 미리보기</button>
+    </div>
+
+    <!-- 진행 -->
+    <div class="progress-wrap" id="progWrap">
+      <div class="prog-meta">
+        <span id="progLabel">처리 중...</span>
+        <span id="progPct">0%</span>
+      </div>
+      <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+    </div>
+
+    <!-- 로그 -->
+    <div class="log-box" id="logBox">
+      <div class="log-top">
+        <div class="log-led" id="logLed"></div>
+        <span id="logStat">대기 중</span>
+      </div>
+      <div class="log-content" id="logContent"></div>
+    </div>
+
+    <!-- 결과 -->
+    <div class="result-bar" id="resultBar">
+      <div class="result-icon">✅</div>
+      <div class="result-text">
+        <div class="result-title">변환 완료</div>
+        <div class="result-sub" id="resultSub">—</div>
+      </div>
+      <button class="btn-dl" id="btnDl">⬇  PPTX 다운로드</button>
+    </div>
+  </div>
+
+  <!-- 미리보기 -->
+  <div class="preview-area" id="prevArea">
+    <div class="section-label">페이지 썸네일 미리보기</div>
+    <div class="thumb-grid" id="thumbGrid"></div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ───────────────────────────────────────────────────
+//  PDF.js 워커
+// ───────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ───────────────────────────────────────────────────
+//  상태
+// ───────────────────────────────────────────────────
+let pdfDoc  = null;
+let pdfFile = null;
+let resultBlob = null;
+
+// DOM
+const dropzone   = document.getElementById('dropzone');
+const fileInput  = document.getElementById('fileInput');
+const fileBar    = document.getElementById('fileBar');
+const fbName     = document.getElementById('fbName');
+const fbMeta     = document.getElementById('fbMeta');
+const fbRemove   = document.getElementById('fbRemove');
+const btnRun     = document.getElementById('btnRun');
+const btnPrev    = document.getElementById('btnPrev');
+const btnTxt     = document.getElementById('btnTxt');
+const spin       = document.getElementById('spin');
+const logBox     = document.getElementById('logBox');
+const logContent = document.getElementById('logContent');
+const logLed     = document.getElementById('logLed');
+const logStat    = document.getElementById('logStat');
+const progWrap   = document.getElementById('progWrap');
+const progFill   = document.getElementById('progFill');
+const progLabel  = document.getElementById('progLabel');
+const progPct    = document.getElementById('progPct');
+const resultBar  = document.getElementById('resultBar');
+const resultSub  = document.getElementById('resultSub');
+const btnDl      = document.getElementById('btnDl');
+const prevArea   = document.getElementById('prevArea');
+const thumbGrid  = document.getElementById('thumbGrid');
+
+// ───────────────────────────────────────────────────
+//  파일 드롭 / 선택
+// ───────────────────────────────────────────────────
+dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('active'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('active'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('active');
+  const f = e.dataTransfer.files[0];
+  if (f?.type === 'application/pdf') loadPdf(f);
+  else alert('PDF 파일만 업로드 가능합니다.');
+});
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
+fbRemove.addEventListener('click', reset);
+
+async function loadPdf(file) {
+  pdfFile = file;
+  fbName.textContent = file.name;
+  fbMeta.textContent = `크기: ${(file.size/1024/1024).toFixed(2)} MB · 불러오는 중...`;
+  fileBar.classList.add('show');
+  logBox.classList.add('show');
+  logLed.className = 'log-led run';
+  logStat.textContent = 'PDF 로딩 중...';
+  addLog('info', `파일 로드: ${file.name}`);
+
+  const buf = await file.arrayBuffer();
+  pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+  fbMeta.textContent = `크기: ${(file.size/1024/1024).toFixed(2)} MB · 총 ${pdfDoc.numPages}페이지`;
+  addLog('ok', `PDF 로드 완료 — ${pdfDoc.numPages}페이지`);
+  logLed.className = 'log-led ok';
+  logStat.textContent = '준비됨';
+  btnRun.disabled  = false;
+  btnPrev.disabled = false;
+}
+
+function reset() {
+  pdfDoc = pdfFile = resultBlob = null;
+  fileBar.classList.remove('show');
+  logBox.classList.remove('show');
+  resultBar.classList.remove('show');
+  prevArea.classList.remove('show');
+  progWrap.classList.remove('show');
+  logContent.innerHTML = '';
+  thumbGrid.innerHTML  = '';
+  btnRun.disabled  = true;
+  btnPrev.disabled = true;
+  fileInput.value  = '';
+  setProgress(0, '');
+}
+
+// ───────────────────────────────────────────────────
+//  로그 & 진행률
+// ───────────────────────────────────────────────────
+function addLog(type, msg) {
+  const icon = { ok:'✓', err:'✗', info:'→', warn:'⚠' };
+  const div = document.createElement('div');
+  div.className = `ll ${type}`;
+  div.textContent = `${icon[type]||'·'}  ${msg}`;
+  logContent.appendChild(div);
+  logContent.scrollTop = logContent.scrollHeight;
+}
+
+function setProgress(pct, label) {
+  progFill.style.width = pct + '%';
+  progPct.textContent  = Math.round(pct) + '%';
+  if (label !== undefined) progLabel.textContent = label;
+}
+
+// ───────────────────────────────────────────────────
+//  페이지 렌더 → Canvas
+// ───────────────────────────────────────────────────
+async function renderPage(pageNum, scale) {
+  const page = await pdfDoc.getPage(pageNum);
+  const vp   = page.getViewport({ scale });
+  const cvs  = document.createElement('canvas');
+  cvs.width  = vp.width;
+  cvs.height = vp.height;
+  await page.render({ canvasContext: cvs.getContext('2d'), viewport: vp }).promise;
+  return cvs;
+}
+
+// ───────────────────────────────────────────────────
+//  Canvas 영역 크롭 → base64 PNG
+// ───────────────────────────────────────────────────
+function cropB64(canvas, x, y, w, h) {
+  const tmp = document.createElement('canvas');
+  tmp.width = Math.round(w); tmp.height = Math.round(h);
+  tmp.getContext('2d').drawImage(canvas, Math.round(x), Math.round(y),
+    Math.round(w), Math.round(h), 0, 0, Math.round(w), Math.round(h));
+  return tmp.toDataURL('image/png');
+}
+
+// ───────────────────────────────────────────────────
+//  동적 크롭 좌표 (원본 좌표 비율 기반)
+//  HPLC 원본 캔버스: 1786×2526 (3× 기준)
+//  DSC  원본 캔버스: 2525×1785 (3× 기준)
+// ───────────────────────────────────────────────────
+function hplcBoxes(cvs) {
+  const W = cvs.width, H = cvs.height;
+  return {
+    // 차트: 그래프 + min축 포함
+    chart: [55/1786*W, 640/2526*H, (1730-55)/1786*W, (1330-640)/2526*H],
+    // 테이블: Area Percent Report ~ End of Report
+    table: [55/1786*W, 1350/2526*H, (1730-55)/1786*W, (2430-1350)/2526*H],
+  };
+}
+
+function dscBox(cvs) {
+  const W = cvs.width, H = cvs.height;
+  return [20/2525*W, 55/1785*H, (2510-20)/2525*W, (1700-55)/1785*H];
+}
+
+// ───────────────────────────────────────────────────
+//  페이지 텍스트에서 메타 추출
+// ───────────────────────────────────────────────────
+async function getMeta(pageNum) {
+  const page = await pdfDoc.getPage(pageNum);
+  const tc   = await page.getTextContent();
+  const txt  = tc.items.map(i => i.str).join('\n');
+
+  const pick = (re) => { const m = txt.match(re); return m ? m[1].trim().replace(/^:\s*/,'') : ''; };
+
+  const sampleInfo = pick(/Sample\s+Info\s*:?\s*([^\n]+)/i);
+  const sampleName = pick(/Sample\s+Name:\s*([^\n]+)/i);
+  const signal     = pick(/Signal\s+1:\s*([^\n]+)/i);
+
+  // Tg 값 (Midpoint ISO)
+  const tgAll = [...txt.matchAll(/Midpoint\s+ISO\s+([\d.]+)\s*°?C/gi)];
+  const tg1 = tgAll[0]?.[1] || '';
+  const tg2 = tgAll[1]?.[1] || '';
+
+  return { sampleInfo, sampleName, signal, tg1, tg2 };
+}
+
+// ───────────────────────────────────────────────────
+//  페이지 범위 파싱
+// ───────────────────────────────────────────────────
+function parseRange(str, max) {
+  const out = [];
+  str.split(',').forEach(seg => {
+    seg = seg.trim();
+    if (seg.includes('-')) {
+      let [a, b] = seg.split('-').map(Number);
+      for (let i = a; i <= Math.min(b, max); i++) out.push(i);
+    } else {
+      const n = parseInt(seg);
+      if (n >= 1 && n <= max) out.push(n);
+    }
+  });
+  return out;
+}
+
+// ───────────────────────────────────────────────────
+//  PPTX 빌드
+// ───────────────────────────────────────────────────
+async function buildPptx() {
+  const scale    = parseInt(document.getElementById('cfgScale').value);
+  const pairMode = parseInt(document.getElementById('cfgPair').value);
+  const title    = document.getElementById('cfgTitle').value;
+  const material = document.getElementById('cfgMaterial').value;
+  const total    = pdfDoc.numPages;
+
+  const hplcPages = parseRange(document.getElementById('cfgHplc').value, total);
+  const dscPages  = parseRange(document.getElementById('cfgDsc').value, total);
+
+  const W = 10, H = 5.625;
+  const RED = 'C0212B', WHITE = 'FFFFFF', LGRAY = 'F2F2F2';
+
+  const pres = new PptxGenJS();
+  pres.layout = 'LAYOUT_16x9';
+  pres.title  = title;
+
+  // ── 공통 크롬 (헤더+푸터)
+  function addChrome(slide, headerTxt) {
+    slide.background = { color: LGRAY };
+    slide.addShape(pres.shapes.RECTANGLE,{ x:0,y:0,w:W,h:.52, fill:{color:RED}, line:{color:RED} });
+    slide.addShape(pres.shapes.DIAMOND,  { x:.13,y:.09,w:.3,h:.3, fill:{color:WHITE}, line:{color:WHITE} });
+    slide.addText(headerTxt, { x:.52,y:0,w:9.2,h:.52, fontSize:13,bold:true,color:WHITE,valign:'middle',margin:0 });
+    slide.addShape(pres.shapes.RECTANGLE,{ x:0,y:H-.33,w:W,h:.33, fill:{color:'DDDDDD'}, line:{color:'CCCCCC'} });
+    slide.addText('LT Materials',   { x:.2, y:H-.33,w:3, h:.33, fontSize:8,bold:true,color:'444444',valign:'middle',margin:0 });
+    slide.addText('전자 재료 사업부',  { x:7.0,y:H-.33,w:2.8,h:.33, fontSize:8,color:'444444',valign:'middle',align:'right',margin:0 });
+  }
+
+  // ── 서브 타이틀 박스
+  function addSubBox(slide, info) {
+    slide.addShape(pres.shapes.RECTANGLE,{ x:2.7,y:.56,w:4.6,h:.62, fill:{color:WHITE}, line:{color:'CCCCCC'} });
+    slide.addText([
+      { text:`LT 회수재료 ${material} :\n`, options:{fontSize:8,color:'888888'} },
+      { text: info,                          options:{fontSize:12,bold:true,color:'1A1A1A'} }
+    ],{ x:2.7,y:.56,w:4.6,h:.62, align:'center',valign:'middle' });
+  }
+
+  const totalWork = 1 + Math.ceil(hplcPages.length / pairMode) + dscPages.length;
+  let done = 0;
+
+  // ─────────────────────────────────────
+  //  타이틀 슬라이드
+  // ─────────────────────────────────────
+  const ts = pres.addSlide();
+  ts.background = { color: '111111' };
+  ts.addShape(pres.shapes.RECTANGLE, { x:0,y:0,w:W,h:1.7, fill:{color:RED}, line:{color:RED} });
+  ts.addText(material, { x:.5,y:.08,w:9,h:1.0, fontSize:54,bold:true,color:WHITE,align:'center',fontFace:'Arial' });
+  ts.addText(title,    { x:.5,y:1.0,w:9,h:.56, fontSize:18,color:WHITE,align:'center' });
+  ts.addText('HPLC 순도분석  ·  DSC 유리전이온도 분석', { x:.5,y:2.5,w:9,h:.5, fontSize:13,color:'666666',align:'center' });
+  const now = new Date();
+  ts.addText(`${now.getFullYear()}년 ${now.getMonth()+1}월`, { x:.5,y:5.0,w:9,h:.4, fontSize:10,color:'555555',align:'center' });
+
+  done++;
+  setProgress(done/totalWork*100, '타이틀 슬라이드 생성');
+
+  // ─────────────────────────────────────
+  //  HPLC 슬라이드
+  // ─────────────────────────────────────
+  addLog('info', `HPLC 처리 시작 — ${hplcPages.length}페이지`);
+
+  for (let i = 0; i < hplcPages.length; i += pairMode) {
+    const p1 = hplcPages[i];
+    const p2 = pairMode === 2 ? hplcPages[i + 1] : null;
+
+    // 렌더 & 크롭
+    const cvs1   = await renderPage(p1, scale);
+    const b1     = hplcBoxes(cvs1);
+    const cChart1 = cropB64(cvs1, ...b1.chart);
+    const cTable1 = cropB64(cvs1, ...b1.table);
+    const meta1  = await getMeta(p1);
+
+    let cChart2 = null, cTable2 = null;
+    if (p2) {
+      const cvs2 = await renderPage(p2, scale);
+      const b2   = hplcBoxes(cvs2);
+      cChart2 = cropB64(cvs2, ...b2.chart);
+      cTable2 = cropB64(cvs2, ...b2.table);
+    }
+
+    const sInfo = meta1.sampleInfo || `Page ${p1}`;
+    const slide  = pres.addSlide();
+    addChrome(slide, `${material} 회수재료 순도분석  [${sInfo}]`);
+    addSubBox(slide, sInfo);
+
+    if (pairMode === 2 && p2) {
+      // ── 2컬럼
+      const cols = [
+        { x:.12, lbl:'1st', chart:cChart1, table:cTable1 },
+        { x:5.16, lbl:'2nd', chart:cChart2, table:cTable2 },
+      ];
+      const PW = 4.72;
+      cols.forEach(({ x, lbl, chart, table }) => {
+        slide.addShape(pres.shapes.RECTANGLE,{ x,y:1.22,w:PW,h:H-1.62,
+          fill:{color:WHITE},line:{color:'DDDDDD'},
+          shadow:{type:'outer',blur:4,offset:2,angle:135,color:'000000',opacity:.07} });
+        slide.addShape(pres.shapes.RECTANGLE,{ x,y:1.22,w:.44,h:.26,fill:{color:RED},line:{color:RED} });
+        slide.addText(lbl,{ x,y:1.22,w:.44,h:.26,fontSize:8,bold:true,color:WHITE,align:'center',valign:'middle',margin:0 });
+        slide.addImage({ data:chart, x:x+.04, y:1.30, w:PW-.08, h:1.62 });
+        slide.addImage({ data:table, x:x+.04, y:2.96, w:PW-.08, h:H-3.37 });
+      });
+    } else {
+      // ── 단독
+      const PW = 9.0, PX = .5;
+      slide.addShape(pres.shapes.RECTANGLE,{ x:PX,y:1.22,w:PW,h:H-1.62,
+        fill:{color:WHITE},line:{color:'DDDDDD'},
+        shadow:{type:'outer',blur:4,offset:2,angle:135,color:'000000',opacity:.07} });
+      slide.addImage({ data:cChart1, x:PX+.04, y:1.28, w:PW-.08, h:1.85 });
+      slide.addImage({ data:cTable1, x:PX+.04, y:3.18, w:PW-.08, h:H-3.57 });
+    }
+
+    done++;
+    setProgress(done/totalWork*100, `HPLC (${Math.min(i+pairMode, hplcPages.length)}/${hplcPages.length})`);
+    addLog('ok', `HPLC p${p1}${p2?' + p'+p2:''} → [${sInfo}]`);
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // ─────────────────────────────────────
+  //  DSC 슬라이드
+  // ─────────────────────────────────────
+  addLog('info', `DSC 처리 시작 — ${dscPages.length}페이지`);
+
+  for (let i = 0; i < dscPages.length; i++) {
+    const p    = dscPages[i];
+    const cvs  = await renderPage(p, scale);
+    const box  = dscBox(cvs);
+    const img  = cropB64(cvs, ...box);
+    const meta = await getMeta(p);
+
+    const sInfo = meta.sampleInfo || `Page ${p}`;
+    const slide  = pres.addSlide();
+    addChrome(slide, `${material} 회수재료 DSC 분석  [${sInfo}]`);
+    addSubBox(slide, sInfo);
+
+    // Tg 박스 (우측)
+    if (meta.tg1 || meta.tg2) {
+      slide.addShape(pres.shapes.RECTANGLE,{ x:7.4,y:.56,w:2.45,h:.62,fill:{color:WHITE},line:{color:'CCCCCC'} });
+      slide.addText([
+        { text:`(1st cycle)  Tg ${meta.tg1} ℃\n`, options:{fontSize:9,bold:true,color:'BB0000'} },
+        { text:`(2nd cycle)  Tg ${meta.tg2} ℃`,   options:{fontSize:9,bold:true,color:'333333'} }
+      ],{ x:7.4,y:.56,w:2.45,h:.62, align:'center',valign:'middle' });
+    }
+
+    // DSC 그래프
+    slide.addShape(pres.shapes.RECTANGLE,{ x:.12,y:1.22,w:9.76,h:H-1.62,
+      fill:{color:WHITE},line:{color:'DDDDDD'},
+      shadow:{type:'outer',blur:4,offset:2,angle:135,color:'000000',opacity:.07} });
+    slide.addImage({ data:img, x:.15, y:1.25, w:9.70, h:H-1.66 });
+
+    done++;
+    setProgress(done/totalWork*100, `DSC (${i+1}/${dscPages.length})`);
+    addLog('ok', `DSC p${p} → [${sInfo}]`);
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // ─────────────────────────────────────
+  //  파일 생성
+  // ─────────────────────────────────────
+  addLog('info', 'PPTX 파일 생성 중...');
+  const blob = await pres.write({ outputType: 'blob' });
+  return blob;
+}
+
+// ───────────────────────────────────────────────────
+//  버튼 이벤트
+// ───────────────────────────────────────────────────
+btnRun.addEventListener('click', async () => {
+  if (!pdfDoc) return;
+
+  btnRun.disabled  = true;
+  btnPrev.disabled = true;
+  spin.classList.add('on');
+  btnTxt.textContent = '변환 중...';
+  logBox.classList.add('show');
+  logContent.innerHTML = '';
+  progWrap.classList.add('show');
+  resultBar.classList.remove('show');
+  logLed.className = 'log-led run';
+  logStat.textContent = '처리 중...';
+  setProgress(0, '시작 중...');
+
+  try {
+    const blob = await buildPptx();
+    resultBlob = blob;
+
+    setProgress(100, '완료!');
+    logLed.className = 'log-led ok';
+    logStat.textContent = '변환 완료';
+    addLog('ok', `완료 — ${(blob.size/1024).toFixed(0)} KB`);
+
+    const hplcPages = parseRange(document.getElementById('cfgHplc').value, pdfDoc.numPages);
+    const dscPages  = parseRange(document.getElementById('cfgDsc').value, pdfDoc.numPages);
+    const pairMode  = parseInt(document.getElementById('cfgPair').value);
+    const slides    = 1 + Math.ceil(hplcPages.length/pairMode) + dscPages.length;
+
+    resultSub.textContent = `슬라이드 ${slides}장  ·  HPLC ${hplcPages.length}페이지  ·  DSC ${dscPages.length}페이지  ·  ${(blob.size/1024).toFixed(0)} KB`;
+    resultBar.classList.add('show');
+    resultBar.scrollIntoView({ behavior:'smooth', block:'center' });
+
+  } catch (err) {
+    logLed.className = 'log-led err';
+    logStat.textContent = '오류 발생';
+    addLog('err', `오류: ${err.message}`);
+    console.error(err);
+  } finally {
+    btnRun.disabled  = false;
+    btnPrev.disabled = false;
+    spin.classList.remove('on');
+    btnTxt.textContent = '▶  PPTX 변환 시작';
+  }
+});
+
+// ─── 미리보기
+btnPrev.addEventListener('click', async () => {
+  if (!pdfDoc) return;
+  prevArea.classList.add('show');
+  thumbGrid.innerHTML = '';
+
+  const hplcPages = parseRange(document.getElementById('cfgHplc').value, pdfDoc.numPages);
+  const dscPages  = parseRange(document.getElementById('cfgDsc').value, pdfDoc.numPages);
+  const hSet = new Set(hplcPages), dSet = new Set(dscPages);
+
+  for (let p = 1; p <= pdfDoc.numPages; p++) {
+    const cvs = await renderPage(p, 0.35);
+    const item = document.createElement('div');
+    item.className = 'thumb';
+    const c2 = document.createElement('canvas');
+    c2.width = cvs.width; c2.height = cvs.height;
+    c2.getContext('2d').drawImage(cvs, 0, 0);
+    const lbl = document.createElement('div');
+    lbl.className = 'thumb-lbl';
+    const tag = document.createElement('span');
+    tag.className = `thumb-type${dSet.has(p)?' dsc':''}`;
+    tag.textContent = dSet.has(p) ? 'DSC' : hSet.has(p) ? 'HPLC' : '—';
+    lbl.appendChild(tag);
+    lbl.appendChild(document.createTextNode(`p${p}`));
+    item.appendChild(c2);
+    item.appendChild(lbl);
+    thumbGrid.appendChild(item);
+    await new Promise(r => setTimeout(r, 0));
+  }
+  prevArea.scrollIntoView({ behavior:'smooth' });
+});
+
+// ─── 다운로드
+btnDl.addEventListener('click', () => {
+  if (!resultBlob) return;
+  const url = URL.createObjectURL(resultBlob);
+  const a   = document.createElement('a');
+  a.href     = url;
+  a.download = `${document.getElementById('cfgTitle').value.replace(/\s+/g,'_')}.pptx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+});
+</script>
+</body>
+</html>
